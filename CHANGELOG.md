@@ -5,6 +5,34 @@ All notable changes to **pi-pushtodisplay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-09
+
+Release packaging and publishing path for the first npm publish.
+
+### Changed
+
+- **The npm tarball no longer ships tests.** `files` excludes
+  `src/__tests__`, taking the package from 25 files / 124.6 kB unpacked to
+  15 files / 90.2 kB unpacked (30.9 kB tarball). Runtime files, the Pi
+  manifest, skill, README, CHANGELOG, and LICENSE are unchanged.
+- **Explicit public publish config.** `publishConfig.access` is `public` so an
+  accidental registry config cannot publish the package as restricted.
+- **The publish workflow supports the first release.** `version_bump: none`
+  publishes the current `package.json` version, a granular `NPM_TOKEN` is used
+  as a one-time first-publish fallback, and npm Trusted Publishing (OIDC) is
+  used automatically when the secret is absent. Both paths publish with
+  `--access public` and provenance.
+- **The workflow now commits the lockfile too.** `npm version` updates
+  `package-lock.json`; the release commit stages both files, so a release no
+  longer leaves the checkout dirty. It also rejects a tarball that contains
+  `src/__tests__` and verifies the published version, dist-tags, and
+  `pi-package` keyword on the registry.
+- **Publishing documentation** added at `docs/publishing.md`: first-publish
+  commands, the exact Trusted Publisher fields for this repository, the OIDC
+  release flow, verification steps, and manual fallback.
+- **README install** leads with `pi install npm:pi-pushtodisplay` and links the
+  Pi package catalog entry; the Development section documents the release path.
+
 ## [0.2.0] - 2026-11-05
 
 Panel output was rebuilt around what the board actually does, which is not what

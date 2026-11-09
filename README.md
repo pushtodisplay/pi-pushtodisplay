@@ -91,6 +91,10 @@ Project-scoped (shared via `.pi/settings.json`):
 pi install -l npm:pi-pushtodisplay
 ```
 
+The package carries the `pi-package` keyword, so npm releases are indexed by the
+[Pi package catalog](https://pi.dev/packages/pi-pushtodisplay) automatically;
+there is no separate submission step.
+
 **Requirements:** Node.js ≥ 18. The `pushtodisplay` CLI is installed automatically as a dependency. If you already have a global `pushtodisplay` binary (e.g. `npm i -g pushtodisplay`), it's used as a fallback.
 
 ## Quick start
@@ -185,6 +189,19 @@ npm test -- --coverage
 ```
 
 The package is plain TypeScript — pi loads `index.ts` directly (no build step). Unit tests live under `src/__tests__/`.
+
+## Release
+
+The first npm publish is a one-time authenticated step; later releases run from
+the [publish workflow](https://github.com/pushtodisplay/pi-pushtodisplay/blob/main/.github/workflows/pi-pushtodisplay-publish.yaml)
+with npm Trusted Publishing (OIDC) and provenance. See
+[docs/publishing.md](https://github.com/pushtodisplay/pi-pushtodisplay/blob/main/docs/publishing.md)
+for the exact first-publish commands, the Trusted Publisher fields for this
+repository, and the verification steps.
+
+After the first publish, the package is installable with
+`pi install npm:pi-pushtodisplay` and appears in the
+[Pi package catalog](https://pi.dev/packages/pi-pushtodisplay).
 
 ## Architecture
 

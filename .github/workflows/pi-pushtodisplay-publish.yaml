@@ -13,11 +13,12 @@ on:
           - rc
           - stable
       version_bump:
-        description: "Version bump"
+        description: "Version bump (none publishes the current package.json version; use for the first release)"
         required: false
         type: choice
         default: patch
         options:
+          - none
           - patch
           - minor
           - major
@@ -33,6 +34,7 @@ on:
         default: false
 
 permissions:
+  contents: read
   id-token: write
 
 concurrency:
@@ -52,6 +54,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -73,34 +76,42 @@ jobs:
           CURRENT=$(node -p "require('./package.json').version")
           BASE=$(echo "$CURRENT" | sed 's/-.*//')
 
-          # Bump base version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-          case "${{ inputs.version_bump }}" in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-          esac
-          BUMPED="${MAJOR}.${MINOR}.${PATCH}"
-
-          if [[ "${{ inputs.release_type }}" == "stable" ]]; then
-            NEW_VERSION="$BUMPED"
+          if [[ "${{ inputs.version_bump }}" == "none" ]]; then
+            if [[ "${{ inputs.release_type }}" != "stable" ]]; then
+              echo "::error::version_bump=none is only valid with release_type=stable"
+              exit 1
+            fi
+            NEW_VERSION="$CURRENT"
           else
-            # Find the next pre-release number by parsing all existing versions
-            TAG="${{ inputs.release_type }}"
-            PRE_NUM=$(node -e "
-              const versions = JSON.parse(require('child_process').execSync(
-                'npm view pi-pushtodisplay versions --json', { encoding: 'utf8' }
-              ).trim() || '[]');
-              const prefix = '${BUMPED}-${TAG}.';
-              const max = versions
-                .filter(v => v.startsWith(prefix))
-                .map(v => parseInt(v.slice(prefix.length), 10))
-                .filter(n => !isNaN(n))
-                .reduce((a, b) => Math.max(a, b), -1);
-              console.log(max + 1);
-            " 2>/dev/null || echo "0")
+            # Bump base version
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            case "${{ inputs.version_bump }}" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+            esac
+            BUMPED="${MAJOR}.${MINOR}.${PATCH}"
 
-            NEW_VERSION="${BUMPED}-${TAG}.${PRE_NUM}"
+            if [[ "${{ inputs.release_type }}" == "stable" ]]; then
+              NEW_VERSION="$BUMPED"
+            else
+              # Find the next pre-release number by parsing all existing versions
+              TAG="${{ inputs.release_type }}"
+              PRE_NUM=$(node -e "
+                const versions = JSON.parse(require('child_process').execSync(
+                  'npm view pi-pushtodisplay versions --json', { encoding: 'utf8' }
+                ).trim() || '[]');
+                const prefix = '${BUMPED}-${TAG}.';
+                const max = versions
+                  .filter(v => v.startsWith(prefix))
+                  .map(v => parseInt(v.slice(prefix.length), 10))
+                  .filter(n => !isNaN(n))
+                  .reduce((a, b) => Math.max(a, b), -1);
+                console.log(max + 1);
+              " 2>/dev/null || echo "0")
+
+              NEW_VERSION="${BUMPED}-${TAG}.${PRE_NUM}"
+            fi
           fi
 
           # Determine npm dist-tag: explicit override > default (stable->latest, pre-release->release_type)
@@ -117,14 +128,38 @@ jobs:
           echo "Will publish pi-pushtodisplay@${NEW_VERSION} with tag: ${DIST_TAG}"
 
       - name: Set version in package.json
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Verify package contents
-        run: npm pack --dry-run 2>&1
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/pi-pushtodisplay-pack.txt
+          if grep -q "src/__tests__" /tmp/pi-pushtodisplay-pack.txt; then
+            echo "::error::test files are included in the published tarball"
+            exit 1
+          fi
 
-      - name: Publish to npm
-        if: ${{ inputs.dry_run == false }}
-        run: npm publish --provenance --tag ${{ steps.version.outputs.tag }}
+      - name: Select publish authentication
+        id: auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -n "$NPM_TOKEN" ]]; then
+            echo "method=token" >> "$GITHUB_OUTPUT"
+            echo "Using NPM_TOKEN for this publish."
+          else
+            echo "method=oidc" >> "$GITHUB_OUTPUT"
+            echo "Using npm Trusted Publishing (OIDC)."
+          fi
+
+      - name: Publish to npm (NPM_TOKEN first-publish fallback)
+        if: ${{ inputs.dry_run == false && steps.auth.outputs.method == 'token' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public --tag "${{ steps.version.outputs.tag }}"
+
+      - name: Publish to npm (Trusted Publishing / OIDC)
+        if: ${{ inputs.dry_run == false && steps.auth.outputs.method == 'oidc' }}
+        run: npm publish --provenance --access public --tag "${{ steps.version.outputs.tag }}"
 
       - name: Dry run publish
         if: ${{ inputs.dry_run == true }}
@@ -132,22 +167,34 @@ jobs:
           echo "DRY RUN - would publish:"
           echo "  Package: pi-pushtodisplay@${{ steps.version.outputs.version }}"
           echo "  Tag: ${{ steps.version.outputs.tag }}"
-          npm pack --dry-run
 
       - name: Commit version & create git tag
         if: ${{ inputs.dry_run == false }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "chore: release v${{ steps.version.outputs.version }}"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "No version change to commit."
+          else
+            git commit -m "chore: release v${{ steps.version.outputs.version }}"
+          fi
           git tag "pi-pushtodisplay-v${{ steps.version.outputs.version }}"
-          git push origin HEAD "pi-pushtodisplay-v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main "pi-pushtodisplay-v${{ steps.version.outputs.version }}"
 
       - name: Verify publish
         if: ${{ inputs.dry_run == false }}
         run: |
           echo "Waiting for npm registry propagation..."
           sleep 10
-          npm info pi-pushtodisplay@${{ steps.version.outputs.version }} version
-          echo "pi-pushtodisplay@${{ steps.version.outputs.version }} is live"
+          npm view "pi-pushtodisplay@${{ steps.version.outputs.version }}" version
+          npm view pi-pushtodisplay dist-tags --json
+          KEYWORDS=$(npm view pi-pushtodisplay keywords --json)
+          echo "$KEYWORDS"
+          if ! grep -q '"pi-package"' <<< "$KEYWORDS"; then
+            echo "::error::published package is missing the pi-package keyword"
+            exit 1
+          fi
+          curl -fsS --max-time 15 "https://pi.dev/packages/pi-pushtodisplay" > /dev/null \
+            && echo "Pi catalog page is live" \
+            || echo "Pi catalog page is not live yet (crawler lag); package is published"

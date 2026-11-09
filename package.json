@@ -1,6 +1,6 @@
 {
   "name": "pi-pushtodisplay",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Mirror pi agent activity onto your Push To Display board as a shared, human-readable log (lifecycle, tasks, tool steps, alerts, errors)",
   "type": "module",
   "keywords": [
@@ -52,11 +52,15 @@
   "files": [
     "index.ts",
     "src",
+    "!src/__tests__",
     "skills",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "pushtodisplay": "^0.1.15"
   },
