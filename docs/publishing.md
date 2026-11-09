@@ -6,9 +6,9 @@ catalog page is:
 
 <https://pi.dev/packages/pi-pushtodisplay>
 
-**Current state:** `pi-pushtodisplay@0.2.1` is published on npm. The
-first-publish section below is retained for reference. Configure the Trusted
-Publisher before the next release so future versions publish through OIDC.
+**Current state:** `pi-pushtodisplay@0.2.2` is published on npm with a
+provenance attestation. The first-publish section below is retained for
+reference. Future releases use the configured Trusted Publisher.
 
 ## First publish (completed for 0.2.1)
 
@@ -49,11 +49,12 @@ runner.
 3. Run **Actions → pi-pushtodisplay Publish → Run workflow** on `main`:
    - `release_type`: `stable`
    - `version_bump`: `none` (publishes the current `package.json` version)
+   - `use_npm_token`: `true`
    - `dry_run`: `false`
 
-When `NPM_TOKEN` is present the workflow publishes with that token; otherwise it
-uses Trusted Publishing (OIDC). Both paths publish with provenance on
-GitHub-hosted runners from this public repository.
+The workflow defaults to Trusted Publishing (OIDC). Set `use_npm_token: true`
+only for a package that does not have a Trusted Publisher yet; that path uses
+`NPM_TOKEN` but still produces provenance on GitHub-hosted runners.
 
 ## Configure Trusted Publishing (before the next release)
 
@@ -89,7 +90,7 @@ an unverified configuration. The workflow lives at
 
 Once an OIDC publish succeeds:
 
-1. Delete the `NPM_TOKEN` repository secret.
+1. Delete the `NPM_TOKEN` secret (repository or organization scope).
 2. In npm package settings, set **Publishing access** to
    **Require two-factor authentication and disallow tokens**.
 3. Revoke any token used for the first publish.
@@ -102,6 +103,7 @@ Once an OIDC publish succeeds:
 2. Run **Actions → pi-pushtodisplay Publish → Run workflow**:
    - `release_type`: `stable` (or `alpha` / `beta` / `rc`)
    - `version_bump`: `patch` (or `minor` / `major`)
+   - `use_npm_token`: leave `false` for Trusted Publishing
    - `dry_run`: `false`
 3. The workflow:
    - runs `npm ci` and `npm run check`

@@ -22,6 +22,11 @@ on:
           - patch
           - minor
           - major
+      use_npm_token:
+        description: "Use NPM_TOKEN instead of Trusted Publishing (only for a package without a Trusted Publisher)"
+        required: false
+        type: boolean
+        default: false
       npm_tag:
         description: "Override npm dist-tag (leave empty for default: stable->latest, pre-release->release_type)"
         required: false
@@ -143,7 +148,7 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [[ -n "$NPM_TOKEN" ]]; then
+          if [[ "${{ inputs.use_npm_token }}" == "true" && -n "$NPM_TOKEN" ]]; then
             echo "method=token" >> "$GITHUB_OUTPUT"
             echo "Using NPM_TOKEN for this publish."
           else
@@ -185,9 +190,25 @@ jobs:
       - name: Verify publish
         if: ${{ inputs.dry_run == false }}
         run: |
-          echo "Waiting for npm registry propagation..."
-          sleep 10
-          npm view "pi-pushtodisplay@${{ steps.version.outputs.version }}" version
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Waiting for npm registry propagation and tarball availability..."
+          READY=0
+          for attempt in {1..24}; do
+            if npm view "pi-pushtodisplay@$VERSION" version >/dev/null 2>&1; then
+              TARBALL=$(npm view "pi-pushtodisplay@$VERSION" dist.tarball)
+              if [ -n "$TARBALL" ] && curl -fsS -o /dev/null --max-time 20 "$TARBALL"; then
+                READY=1
+                break
+              fi
+            fi
+            echo "Attempt $attempt/24: $VERSION not fully available yet; retrying in 10s..."
+            sleep 10
+          done
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::pi-pushtodisplay@$VERSION was published but its tarball is not reachable after 4 minutes"
+            exit 1
+          fi
+          npm view "pi-pushtodisplay@$VERSION" version
           npm view pi-pushtodisplay dist-tags --json
           KEYWORDS=$(npm view pi-pushtodisplay keywords --json)
           echo "$KEYWORDS"
