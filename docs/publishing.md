@@ -6,9 +6,9 @@ catalog page is:
 
 <https://pi.dev/packages/pi-pushtodisplay>
 
-**Current state:** `pi-pushtodisplay@0.2.2` is published on npm with a
+**Current state:** `pi-pushtodisplay@0.2.3` is published on npm (latest) with a
 provenance attestation. The first-publish section below is retained for
-reference. Future releases use the configured Trusted Publisher.
+reference. Future releases use the configured publish workflow.
 
 ## First publish (completed for 0.2.1)
 
