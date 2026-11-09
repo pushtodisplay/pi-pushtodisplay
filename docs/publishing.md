@@ -6,20 +6,33 @@ catalog page is:
 
 <https://pi.dev/packages/pi-pushtodisplay>
 
-## One-time setup: first publish
+**Current state:** `pi-pushtodisplay@0.2.1` is published on npm. The
+first-publish section below is retained for reference. Configure the Trusted
+Publisher before the next release so future versions publish through OIDC.
+
+## First publish (completed for 0.2.1)
 
 npm Trusted Publishing can only be configured after the package exists, so the
-first publish uses either a local npm login or a granular access token.
+first publish used a local npm login with 2FA. npm briefly showed a temporary
+`0.0.0-stage` placeholder while the new package was processed; `0.2.1` became
+the `latest` version once processing completed.
 
 ### Option A: publish from a trusted machine
 
 ```bash
-npm login
+npm login --auth-type=legacy
 npm whoami                 # must print your npm username
 npm run check
 npm pack --dry-run         # confirm the tarball contains no tests
-npm publish --access public
+npm publish --access public --tag latest
 npm view pi-pushtodisplay version
+```
+
+If npm opens a broken `/auth/cli/...` web-2FA page instead of prompting for an
+OTP, pass the current authenticator code explicitly:
+
+```bash
+npm publish --access public --tag latest --otp=<current-code>
 ```
 
 `prepublishOnly` runs `npm run check` again. Do not add `--provenance` to a
@@ -28,11 +41,9 @@ runner.
 
 ### Option B: publish from GitHub Actions with a token
 
-1. Create a granular npm access token with read/write access. Because
-   `pi-pushtodisplay` does not exist yet, choose **All packages** (or an
-   automation token with publish rights); a token scoped to the not-yet-created
-   package cannot be selected. If the account requires 2FA for writes, enable
-   the token's 2FA bypass.
+1. Create a granular npm access token with read/write access, scoped to
+   `pi-pushtodisplay` (or **All packages** if the package is still new). If the
+   account requires 2FA for writes, enable the token's 2FA bypass.
 2. Add it as the repository secret `NPM_TOKEN` in
    `pushtodisplay/pi-pushtodisplay`.
 3. Run **Actions → pi-pushtodisplay Publish → Run workflow** on `main`:
@@ -44,7 +55,11 @@ When `NPM_TOKEN` is present the workflow publishes with that token; otherwise it
 uses Trusted Publishing (OIDC). Both paths publish with provenance on
 GitHub-hosted runners from this public repository.
 
-## Configure Trusted Publishing (after the first publish)
+## Configure Trusted Publishing (before the next release)
+
+The package now exists on npm. Create the Trusted Publisher only when you are
+ready to cut the next release, because npm expires an unverified configuration
+after 2 days.
 
 In npm, open **Packages → pi-pushtodisplay → Settings → Trusted publishing**,
 choose **GitHub Actions**, and enter:
