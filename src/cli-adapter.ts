@@ -1,5 +1,5 @@
 /**
- * Adapter for the `pushtodisplay` CLI (`npm i pushtodisplay`).
+ * Adapter for the `pushtodisplay` CLI bundled with this package.
  *
  * The CLI implements the OAuth 2.0 device-code flow against
  * https://idp.pushtodisplay.com. It stores credentials in the OS keychain
@@ -7,10 +7,12 @@
  * to ~/.config/pushtodisplay/credentials.json only when no keychain is
  * available, auto-refreshing the access token.
  *
- * Binary resolution, in order:
- *   1. the `pushtodisplay` npm dependency installed next to this package
- *      (self-contained installs via `pi install`),
- *   2. a global `pushtodisplay` binary on PATH (manual setups).
+ * Binary resolution, in order (an internal implementation detail):
+ *   1. the vendored `vendor/pushtodisplay` release (or an installed
+ *      `node_modules/pushtodisplay` dependency in a developer checkout),
+ *   2. a `pushtodisplay` binary on PATH (resilience only).
+ *
+ * Users never install the CLI separately; `pi install` carries it.
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
@@ -21,13 +23,19 @@ import type { Payload } from "./payloads.ts";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * The CLI release this package is tested against. Keep in sync with
+ * `vendor/pushtodisplay/package.json`.
+ */
+export const PUSHTODISPLAY_CLI_VERSION = "0.1.19";
+
 export interface CliCommand {
   /** Executable to spawn (either the bare CLI name or `process.execPath`). */
   exe: string;
   /** Extra argv to pass before the CLI's own args. */
   prefix: string[];
   /** Where the command came from — used for diagnostics. */
-  source: "npm-dep" | "path";
+  source: "bundled" | "path";
 }
 
 /** Resolve a bare package id to an absolute path (e.g. via `require.resolve`). */
@@ -37,19 +45,19 @@ let resolver: ModuleResolver | null = null;
 let cachedCommand: CliCommand | null = null;
 
 /**
- * Point the adapter at the installed `pushtodisplay` npm dependency.
+ * Point the adapter at the bundled `pushtodisplay` package.
  *
  * Called once from the extension entry (`index.ts`) with a `createRequire`
- * bound to the extension file, so `require.resolve` finds the package's own
- * node_modules. Optional — when unset (or failing) the adapter falls back to
- * a `pushtodisplay` binary on PATH.
+ * bound to the extension file and the vendored manifest path, so resolution is
+ * self-contained. Optional — when unset (or failing) the adapter falls back to
+ * a `pushtodisplay` binary on PATH for resilience.
  */
 export function configureCliResolver(fn: ModuleResolver | null): void {
   resolver = fn;
   cachedCommand = null;
 }
 
-function packageBinPath(): string | null {
+function bundledBinPath(): string | null {
   if (!resolver) return null;
   try {
     const pkgJsonPath = resolver("pushtodisplay/package.json");
@@ -70,9 +78,9 @@ function packageBinPath(): string | null {
 /** Resolve how to invoke the CLI. Result is cached for the process lifetime. */
 export function resolveCli(): CliCommand {
   if (cachedCommand) return cachedCommand;
-  const bin = packageBinPath();
+  const bin = bundledBinPath();
   if (bin) {
-    cachedCommand = { exe: process.execPath, prefix: [bin], source: "npm-dep" };
+    cachedCommand = { exe: process.execPath, prefix: [bin], source: "bundled" };
   } else {
     cachedCommand = { exe: "pushtodisplay", prefix: [], source: "path" };
   }
@@ -158,11 +166,10 @@ export function isCliMissing(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
 
-/** Human-readable install hint shown when the CLI cannot be found at all. */
+/** Human-readable hint shown when the bundled CLI cannot be found at all. */
 export function cliNotFoundMessage(): string {
   return [
     "Push To Display CLI not found.",
-    "Install it with: npm i -g pushtodisplay",
-    "(When installed via `pi install`, the CLI is included automatically.)",
+    "Reinstall the pi package; its CLI is bundled.",
   ].join(" ");
 }

@@ -122,17 +122,28 @@ describe("resolveCli", () => {
     configureCliResolver(null);
   });
 
-  it("uses the bundled npm dependency when a resolver resolves it", () => {
+  it("uses the bundled package when a resolver resolves it", () => {
     const pkgJson = fakePkg({ bin: "./dist/cli.js" });
     try {
       resolveFrom(pkgJson);
       const cmd = resolveCli();
-      expect(cmd.source).toBe("npm-dep");
+      expect(cmd.source).toBe("bundled");
       expect(cmd.exe).toBe(process.execPath);
       expect(cmd.prefix).toEqual([path.join(path.dirname(pkgJson), "dist", "cli.js")]);
     } finally {
       rmSync(path.dirname(pkgJson), { recursive: true, force: true });
     }
+  });
+
+  it("resolves the vendored CLI shipped with the package", () => {
+    const manifest = path.resolve(__dirname, "../../vendor/pushtodisplay/package.json");
+    resolveFrom(manifest);
+    const cmd = resolveCli();
+    expect(cmd.source).toBe("bundled");
+    expect(cmd.exe).toBe(process.execPath);
+    expect(cmd.prefix).toEqual([
+      path.resolve(__dirname, "../../vendor/pushtodisplay/dist/cli.js"),
+    ]);
   });
 
   it("falls back to PATH when the dependency is missing", () => {

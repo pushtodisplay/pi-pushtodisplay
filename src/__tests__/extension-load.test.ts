@@ -72,6 +72,7 @@ describe("extension load", () => {
     expect([...commands.keys()].sort()).toEqual([
       "pushtodisplay-clear",
       "pushtodisplay-login",
+      "pushtodisplay-setup",
       "pushtodisplay-status",
       "pushtodisplay-test",
     ]);

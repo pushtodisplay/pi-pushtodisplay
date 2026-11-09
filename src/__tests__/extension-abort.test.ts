@@ -17,9 +17,15 @@ jest.mock("../cli-adapter.ts", () => ({
   isAuthFailure: () => false,
   isCliMissing: () => false,
   cliNotFoundMessage: () => "cli missing",
+  PUSHTODISPLAY_CLI_VERSION: "0.0.0-test",
 }));
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+
 import register from "../extension.ts";
+import { markSetupComplete } from "../setup-state.ts";
 
 type Handler = (event: never, ctx: never) => unknown;
 
@@ -50,8 +56,20 @@ async function emit(
 const CTX = { cwd: "/tmp/demo", hasUI: false };
 
 describe("run outcome", () => {
+  const previousCache = process.env.PUSHTODISPLAY_PI_CACHE_DIR;
+  let cacheRoot: string;
+
   beforeEach(() => {
     mockSent.length = 0;
+    cacheRoot = mkdtempSync(path.join(tmpdir(), "ptd-pi-abort-"));
+    process.env.PUSHTODISPLAY_PI_CACHE_DIR = cacheRoot;
+    markSetupComplete({}, process.env);
+  });
+
+  afterEach(() => {
+    if (previousCache === undefined) delete process.env.PUSHTODISPLAY_PI_CACHE_DIR;
+    else process.env.PUSHTODISPLAY_PI_CACHE_DIR = previousCache;
+    rmSync(cacheRoot, { recursive: true, force: true });
   });
 
   it("does not post an aborted run's error message as FAIL", async () => {

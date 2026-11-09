@@ -5,6 +5,42 @@ All notable changes to **pi-pushtodisplay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-11-09
+
+Setup is now explicit per integration, and the published package is
+self-contained again.
+
+### Added
+
+- **Per-pi setup marker.** Automatic updates now require both a valid
+  credential and `~/.cache/pushtodisplay/pi/setup.json`. The marker is written
+  only by the new setup flow, after auth is confirmed and a real test entry
+  succeeds. A fresh install on a machine already logged in through Codex,
+  opencode, or another integration sends nothing.
+- **`/pushtodisplay-setup`.** One command that logs in if needed, sends a test
+  entry, and enables updates. `/pushtodisplay-status` now reports setup state.
+  Re-authenticating with `/pushtodisplay-login` preserves the existing marker.
+
+### Changed
+
+- **User docs and skill simplified.** The README and `pushtodisplay` skill
+  document one install path (`pi install npm:pi-pushtodisplay`) followed by one
+  setup action. npx, global-CLI, and direct-CLI instructions were removed.
+  Local checkout, git source, and vendored-CLI maintenance moved to
+  `docs/development.md`.
+- **The CLI is vendored and pinned.** `pushtodisplay@0.1.19` is committed under
+  `vendor/pushtodisplay`; the `^0.1.15` npm dependency was removed. The
+  upstream shrinkwrap made `npm ci` fail with `EBADPLATFORM`, so vendoring the
+  release keeps installs reproducible. PATH remains an internal fallback.
+
+### Tests
+
+- Valid auth without a marker sends nothing.
+- Setup writes the marker and sends a test entry; a failed test writes no
+  marker.
+- Marker plus valid auth sends; marker plus invalid auth drops.
+- The marker is isolated from another integration's cache namespace.
+
 ## [0.2.2] - 2026-11-09
 
 Provenance release. No runtime changes.

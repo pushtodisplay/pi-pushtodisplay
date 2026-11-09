@@ -1,6 +1,6 @@
 {
   "name": "pi-pushtodisplay",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Mirror pi agent activity onto your Push To Display board as a shared, human-readable log (lifecycle, tasks, tool steps, alerts, errors)",
   "type": "module",
   "keywords": [
@@ -54,15 +54,13 @@
     "src",
     "!src/__tests__",
     "skills",
+    "vendor",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
-  },
-  "dependencies": {
-    "pushtodisplay": "^0.1.15"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

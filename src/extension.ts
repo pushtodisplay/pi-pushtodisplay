@@ -28,8 +28,9 @@
  * fallback at ~/.config/pushtodisplay/credentials.json only when no keychain
  * is available; the access token refreshes automatically.
  *
- *   /pushtodisplay-login    start the OAuth login from inside pi (opens browser)
- *   /pushtodisplay-status   show current auth state
+ *   /pushtodisplay-setup    log in if needed, send a test entry, enable updates
+ *   /pushtodisplay-login    re-authenticate from inside pi (opens browser)
+ *   /pushtodisplay-status   show auth and setup state
  *   /pushtodisplay-test     send a test entry to the board (verify wiring)
  *   /pushtodisplay-clear    write a `log cleared` entry to this panel
  *
@@ -39,6 +40,11 @@
  *   PUSHTODISPLAY_LABEL         agent name shown on every line (default: session name, then folder name)
  *   PUSHTODISPLAY_STEPS         Set to "0" to skip per-tool entries
  *   PUSHTODISPLAY_DISABLED      Set to "1" to disable entirely.
+ *
+ * Setup gating: a credential is shared by every Push To Display integration on
+ * the machine, so a login alone does not enable this extension. Automatic
+ * updates require both a successful auth probe and the per-pi setup marker
+ * written by `/pushtodisplay-setup` after a test entry succeeds.
  *
  * Auth gating: an unknown auth state *waits* for the probe rather than dropping
  * the message; a known-bad state drops, and re-probes lazily on the next send
@@ -76,6 +82,8 @@ import {
 import { AuthGate } from "./auth-gate.ts";
 import { Sender } from "./sender.ts";
 import type { Payload } from "./payloads.ts";
+import { setupIntegration } from "./setup.ts";
+import { isSetupComplete } from "./setup-state.ts";
 import {
   sendPayload,
   authStatus,
@@ -150,6 +158,7 @@ export default function extension(pi: ExtensionAPI) {
   // no tool calls, so if the probe has not answered yet, dropping the task line
   // and the result line means the whole turn produces nothing at all.
   let authLostNotified = false;
+  let setupMissingNotified = false;
   let cliMissingNotified = false;
 
   const gate = new AuthGate(() => authStatus(), PROBE_INTERVAL_MS);
@@ -178,6 +187,12 @@ export default function extension(pi: ExtensionAPI) {
     notify("⚠️ Push To Display not authenticated — updates paused. Run /pushtodisplay-login", "warning");
   }
 
+  function notifySetupNeeded() {
+    if (setupMissingNotified) return;
+    setupMissingNotified = true;
+    notify("⚠️ Push To Display is not set up for pi — run /pushtodisplay-setup", "warning");
+  }
+
   async function settleAuth(): Promise<boolean> {
     const ok = await gate.start();
     if (ok) authLostNotified = false;
@@ -187,8 +202,11 @@ export default function extension(pi: ExtensionAPI) {
 
   // ---- transport -----------------------------------------------------------
   // Auth is enforced at dispatch time so every entry is gated the same way.
+  // A shared login is not enough: this pi integration must also have completed
+  // its own setup (auth check + successful test send) before anything posts.
   const sender = new Sender(
     async (payload) => {
+      if (!isSetupComplete()) return;
       // Waits for an in-flight probe instead of discarding the message: the
       // first seconds of a session are exactly when a fast turn reports.
       if (!(await gate.allowed())) return;
@@ -209,6 +227,12 @@ export default function extension(pi: ExtensionAPI) {
     state.cwd = ctx.cwd || process.cwd();
     sessionName = (pi.getSessionName() ?? "").trim();
     state.agent = agentLabel();
+    // A shared login is not enough. Until this pi integration completes its
+    // own setup (auth + successful test entry), the extension stays silent.
+    if (!isSetupComplete()) {
+      notifySetupNeeded();
+      return;
+    }
     beginSession(state);
     // The panel explains its own silence: an opened session says so, otherwise
     // a fresh agent is indistinguishable from a panel nobody uses.
@@ -225,6 +249,7 @@ export default function extension(pi: ExtensionAPI) {
     // Say it out loud: a rename would otherwise only surface on the next entry,
     // which looks like it did not take.
     if (!sessionName) return;
+    if (!isSetupComplete()) return;
     sender.enqueue(
       renamedMessage({ panelId: conf.panel, agent: state.agent, wall: clock() }),
       { urgent: true },
@@ -232,6 +257,7 @@ export default function extension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => {
+    if (!isSetupComplete()) return;
     // Custom-message runs carry no prompt; keep the existing task in that case.
     beginTask(state, event.messageType === "user" ? event.prompt : "");
     sender.enqueue(
@@ -264,6 +290,7 @@ export default function extension(pi: ExtensionAPI) {
     const args = callArgs.get(event.toolCallId);
     callArgs.delete(event.toolCallId);
     if (!conf.steps) return;
+    if (!isSetupComplete()) return;
     // Posted when the step finishes, so the line states what actually happened
     // instead of leaving a stale "running" behind it.
     sender.enqueue(
@@ -280,6 +307,7 @@ export default function extension(pi: ExtensionAPI) {
   });
 
   pi.on("message_end", (event) => {
+    if (!isSetupComplete()) return;
     const message = event.message as { role?: string; stopReason?: string; errorMessage?: string };
     if (message?.role === "assistant" && message.stopReason !== "error") {
       // Remember the answer: the result line quotes it.
@@ -301,6 +329,7 @@ export default function extension(pi: ExtensionAPI) {
   });
 
   pi.on("ui_prompt_start", (event) => {
+    if (!isSetupComplete()) return;
     sender.enqueue(
       blockedMessage({
         panelId: conf.panel,
@@ -314,6 +343,7 @@ export default function extension(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", (event) => {
+    if (!isSetupComplete()) return;
     if (event.aborted) {
       // You pressed Escape — nothing went wrong, so don't report it as a failure.
       // Any error message from this run is the abort itself, not the provider.
@@ -338,6 +368,7 @@ export default function extension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    if (!isSetupComplete()) return;
     // A run that never settled still owes its error line; post it before the
     // closing entry so the pair is not silently lost on shutdown.
     for (const error of pendingErrors) sender.enqueue(error, { urgent: true });
@@ -358,72 +389,132 @@ export default function extension(pi: ExtensionAPI) {
 
   // ---- commands ------------------------------------------------------------
   // OAuth login: run the CLI device-code flow, relay the code, open the
-  // browser, and notify when the token is saved.
+  // browser, and notify when the token is saved. The same routine is used by
+  // setup, which needs to know when login has actually finished.
   let loginProc: ChildProcess | null = null;
 
-  pi.registerCommand("pushtodisplay-login", {
-    description: "Authenticate pi with Push To Display (OAuth device-code flow)",
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      if (loginProc) {
-        ctx.ui.notify("Push To Display login already in progress", "warning");
-        return;
+  async function performLogin(ctx: ExtensionCommandContext): Promise<boolean> {
+    if (loginProc) {
+      ctx.ui.notify("Push To Display login already in progress", "warning");
+      return false;
+    }
+    ctx.ui.notify("Starting Push To Display OAuth login…", "info");
+    console.log("[pushtodisplay] starting OAuth device-code login…");
+
+    const child = spawnCli(["auth", "login", "--device-code"]);
+    loginProc = child;
+
+    let opened = false;
+    let shown = false;
+    let out = "";
+
+    child.stdout?.on("data", (d: Buffer) => {
+      out += d.toString();
+      const m = out.match(/https:\/\/idp\.pushtodisplay\.com\/device\?user_code=[A-Z0-9-]+/);
+      const code = out.match(/(?:enter the code|user_code)[:\s]*([A-Z0-9]{4}-[A-Z0-9]{4})/);
+      if (m && !opened) {
+        opened = true;
+        void openBrowser(m[0]);
       }
-      ctx.ui.notify("Starting Push To Display OAuth login…", "info");
-      console.log("[pushtodisplay] starting OAuth device-code login…");
+      if (code && !shown) {
+        shown = true;
+        ctx.ui.notify(`Approve in the opened browser tab — code: ${code[1]}`, "info");
+      }
+    });
+    child.stderr?.on("data", (d: Buffer) => {
+      console.error("[pushtodisplay]", d.toString().trim());
+    });
 
-      const child = spawnCli(["auth", "login", "--device-code"]);
-      loginProc = child;
-
-      let opened = false;
-      let shown = false;
-      let out = "";
-
-      child.stdout?.on("data", (d: Buffer) => {
-        out += d.toString();
-        const m = out.match(/https:\/\/idp\.pushtodisplay\.com\/device\?user_code=[A-Z0-9-]+/);
-        const code = out.match(/(?:enter the code|user_code)[:\s]*([A-Z0-9]{4}-[A-Z0-9]{4})/);
-        if (m && !opened) {
-          opened = true;
-          void openBrowser(m[0]);
-        }
-        if (code && !shown) {
-          shown = true;
-          ctx.ui.notify(`Approve in the opened browser tab — code: ${code[1]}`, "info");
-        }
-      });
-      child.stderr?.on("data", (d: Buffer) => {
-        console.error("[pushtodisplay]", d.toString().trim());
-      });
+    const code = await new Promise<number>((resolve) => {
       child.on("error", (e) => {
-        loginProc = null;
         if (isCliMissing(e)) {
           ctx.ui.notify(`⚠️ ${cliNotFoundMessage()}`, "error");
         } else {
           ctx.ui.notify(`Failed to start login: ${e.message}`, "error");
         }
+        resolve(1);
       });
-      child.on("exit", (code) => {
-        loginProc = null;
-        if (code === 0) {
-          void gate.start();
-          authLostNotified = false;
-          // The TUI already said so; posting it again costs a message.
-          ctx.ui.notify("✅ Connected to Push To Display!", "info");
-        } else {
-          ctx.ui.notify(`Login failed/cancelled (exit ${code})`, "error");
-        }
+      child.on("close", (value) => resolve(value ?? 1));
+    });
+    loginProc = null;
+
+    if (code !== 0) {
+      ctx.ui.notify(`Login failed/cancelled (exit ${code})`, "error");
+      return false;
+    }
+
+    const authed = await gate.start();
+    if (!authed) {
+      ctx.ui.notify(
+        "Login finished but Push To Display still reports not authenticated",
+        "error",
+      );
+      return false;
+    }
+    authLostNotified = false;
+    // The TUI already said so; posting it again costs a message.
+    ctx.ui.notify("✅ Connected to Push To Display!", "info");
+    return true;
+  }
+
+  pi.registerCommand("pushtodisplay-setup", {
+    description:
+      "Set up Push To Display for pi: log in if needed, send a test entry, and enable updates",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      ctx.ui.notify("Setting up Push To Display…", "info");
+      const result = await setupIntegration({
+        login: () => performLogin(ctx),
+        config: conf,
+        label: agentLabel(),
+        onProgress: (message) => ctx.ui.notify(message, "info"),
       });
+      if (!result.ok) {
+        ctx.ui.notify(`❌ Setup incomplete: ${result.message}`, "error");
+        return;
+      }
+      setupMissingNotified = false;
+      authLostNotified = false;
+      void gate.start();
+      const target = result.record.boardId || "default board";
+      ctx.ui.notify(
+        `✅ Push To Display set up — ${target}, panel ${result.record.panel}`,
+        "info",
+      );
+    },
+  });
+
+  pi.registerCommand("pushtodisplay-login", {
+    description: "Re-authenticate pi with Push To Display (OAuth device-code flow)",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      const ok = await performLogin(ctx);
+      if (!ok) return;
+      if (isSetupComplete()) {
+        ctx.ui.notify("Push To Display updates are enabled.", "info");
+      } else {
+        ctx.ui.notify(
+          "Logged in. Next: run /pushtodisplay-setup to send a test and enable updates.",
+          "info",
+        );
+      }
     },
   });
 
   pi.registerCommand("pushtodisplay-status", {
-    description: "Show Push To Display authentication status",
+    description: "Show Push To Display authentication and setup status",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       const authed = await gate.recheck();
-      if (authed) {
-        ctx.ui.notify("✅ Push To Display authenticated", "info");
+      const setup = isSetupComplete();
+      if (authed && setup) {
+        ctx.ui.notify("✅ Push To Display authenticated and set up", "info");
+      } else if (!setup) {
+        ctx.ui.notify(
+          authed
+            ? "⚠️ Authenticated, but this pi integration is not set up — run /pushtodisplay-setup"
+            : "⚠️ Push To Display is not set up — run /pushtodisplay-setup",
+          "warning",
+        );
       } else {
-        ctx.ui.notify("⚠️ Push To Display not authenticated — run /pushtodisplay-login", "warning");
+        ctx.ui.notify("⚠️ Not authenticated — run /pushtodisplay-login", "warning");
       }
     },
   });
@@ -442,7 +533,12 @@ export default function extension(pi: ExtensionAPI) {
           testMessage({ panelId: conf.panel, agent: state.agent, wall: clock() }),
           conf.boardId,
         );
-        ctx.ui.notify("Test update sent", "info");
+        ctx.ui.notify(
+          isSetupComplete()
+            ? "Test update sent"
+            : "Test update sent — run /pushtodisplay-setup to enable automatic updates",
+          "info",
+        );
       } catch (err) {
         handleSendError(err);
         ctx.ui.notify("Test update failed — see log", "error");
@@ -453,6 +549,10 @@ export default function extension(pi: ExtensionAPI) {
   pi.registerCommand("pushtodisplay-clear", {
     description: "Write a `log cleared` entry to this agent's panel",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!isSetupComplete()) {
+        ctx.ui.notify("⚠️ Run /pushtodisplay-setup first", "warning");
+        return;
+      }
       sender.enqueue(
         clearedMessage({ panelId: conf.panel, agent: state.agent, wall: clock() }),
         { urgent: true },

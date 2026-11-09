@@ -44,8 +44,8 @@ These stay exactly as implemented today:
 - **Auth.** OAuth 2.0 device-code via the bundled `pushtodisplay` CLI; credentials are stored in the OS keychain (macOS Keychain, Linux libsecret, Windows Credential Manager), with a plaintext fallback at `~/.config/pushtodisplay/credentials.json` only when no keychain is available. The access token auto-refreshes. The first probe is awaited; once auth is known to be bad, updates are dropped (never buffered). Re-probes are lazy on send, at most once per 20 s; `/pushtodisplay-status` forces one and `/pushtodisplay-login` re-enables sending.
 - **Rate limiting & quota.** Sends are strictly ordered and spaced ≥ 1.2 s; consecutive duplicates are suppressed; the backlog is bounded (oldest steps dropped); every send counts toward the account's monthly message quota. There is no coalescing.
 - **Panel validation.** `panel` must be an integer 1–4; otherwise falls back to 1. (Now applied to whichever layer supplied the value.)
-- **Commands** `/pushtodisplay-login`, `/pushtodisplay-status`, `/pushtodisplay-test`, `/pushtodisplay-clear` (see §5 for the added one).
-- **CLI resolution.** Bundled npm dependency first, PATH binary fallback.
+- **Commands** `/pushtodisplay-setup`, `/pushtodisplay-login`, `/pushtodisplay-status`, `/pushtodisplay-test`, `/pushtodisplay-clear` (see §5 for the added one). Automatic updates require both auth and the per-pi setup marker written by `/pushtodisplay-setup`.
+- **CLI resolution.** Vendored pinned CLI first, PATH binary fallback (internal).
 
 ---
 
@@ -122,7 +122,8 @@ will confirm what pi-subagents / workflow children expose.**
 
 | Scenario | Expected behavior |
 | --- | --- |
-| Fresh install, no config, no login | One notice: "not authenticated — run /pushtodisplay-login". Updates dropped until login. |
+| Fresh install, no config, no login | One notice: "not set up — run /pushtodisplay-setup". Updates dropped until setup completes. |
+| Fresh install, logged in through another integration | Still silent: `/pushtodisplay-setup` must send a test entry and write this integration's marker. |
 | Fresh install, logged in, no config | Works out of the box: default board, panel 1, label = session name, else workspace folder. One-time notice: "sending to your default board, panel 1 — /pushtodisplay-status to check, /pushtodisplay-config to change." |
 | Work in `~/work/jar` | Resolves `directories` entry → jar board, panel 2 (etc.). |
 | Same folder, second terminal, unnamed | Same directory target as the first; both write to the same panel (see §7). |
@@ -138,8 +139,9 @@ will confirm what pi-subagents / workflow children expose.**
 
 | Command | Behavior |
 | --- | --- |
+| `/pushtodisplay-setup` | *(new)* Log in if needed, send a test entry, and write the per-pi setup marker. |
 | `/pushtodisplay-login` | *(unchanged)* OAuth device-code login. |
-| `/pushtodisplay-status` | *(unchanged)* Auth state. |
+| `/pushtodisplay-status` | Show auth and setup state. |
 | `/pushtodisplay-test` | *(unchanged)* Test entry wiring check. |
 | `/pushtodisplay-clear` | *(unchanged)* Write a `log cleared` entry to this panel. |
 | `/pushtodisplay-config` | *(new)* Show the **resolved** target with its source for each key, and let the user set/change targets interactively. **Takes a scope selector** (§5.1) — aimed at session *or* folder *or* workstation — and persists to `~/.pi/pushtodisplay.json`. |
@@ -180,15 +182,15 @@ Rules:
 ### 5.2 User journey (canonical walkthrough)
 
 ```
-# install + login (existing)
+# install + setup
 pi install npm:pi-pushtodisplay
-/pushtodisplay-login
+/pushtodisplay-setup
 
-# see where you currently land: auth state, resolved target with sources,
-# and the board list with IDs (new status output)
+# see where you currently land: auth, setup state, resolved target with
+# sources, and the board list with IDs (new status output)
 /pushtodisplay-status
 
-# verify wiring (existing)
+# verify wiring (optional)
 /pushtodisplay-test
 
 # aim a scope (new) — or edit ~/.pi/pushtodisplay.json by hand using the

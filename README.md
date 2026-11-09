@@ -70,55 +70,45 @@ prompt; tool descriptions are summarised separately.
 - **A trail, not a status card** — one entry per finished tool step, in the order it happened. `/pushtodisplay-clear` writes a `log cleared` entry; `PUSHTODISPLAY_STEPS=0` drops the per-step entries if you only want milestones.
 - **Failures are reported, never inferred** — a failed step says `FAIL` on its own line; a provider error says what the provider said; `STOP` means you pressed Escape. There is no "the run failed" verdict to contradict a turn that finished, and no threshold that decides one.
 - **Order is preserved** — nothing is reordered, so a result is never sent ahead of the step that caused it. Consecutive duplicates are suppressed, and the backlog is bounded, so the log cannot fall minutes behind the agent.
-- **OAuth-only auth** — no API keys. Reuses the `pushtodisplay` CLI's device-code flow; tokens auto-refresh.
+- **OAuth-only auth** — no API keys and no separate CLI install. The package bundles the `pushtodisplay` CLI's device-code flow; tokens auto-refresh.
 - **Quota-friendly** — every API call counts toward your message quota (Sandbox tiers are rate-limited to ~1 msg/s). Sends are spaced ≥ 1.2 s, consecutive identical lines are skipped per agent, and nothing streams token by token.
-- **Auth gating** — updates wait for the first auth probe, then are dropped (never buffered) while auth is known to be bad; sending resumes automatically once you log in.
-- **Self-contained install** — bundles the `pushtodisplay` CLI as a dependency, so `pi install` works without a global CLI. Falls back to a `pushtodisplay` binary on PATH.
+- **Setup gating** — a fresh install sends nothing until `/pushtodisplay-setup` verifies auth and sends a test entry. A login shared with Codex, opencode, or another integration is not enough.
+- **Auth gating** — after setup, updates wait for the first auth probe, then are dropped (never buffered) while auth is known to be bad; sending resumes automatically once you log in.
+- **Self-contained install** — the pinned `pushtodisplay` CLI ships inside the package, so `pi install` needs no global tools.
 
 ## Install
 
 > **Security:** Pi packages run with full system access. Review the source before installing third-party packages.
 
 ```bash
-pi install npm:pi-pushtodisplay          # from npm
-pi install git:github.com/pushtodisplay/pi-pushtodisplay   # from git
-pi install /path/to/pi-pushtodisplay     # local checkout (run `npm install` first)
-```
-
-Project-scoped (shared via `.pi/settings.json`):
-
-```bash
-pi install -l npm:pi-pushtodisplay
+pi install npm:pi-pushtodisplay
 ```
 
 The package carries the `pi-package` keyword, so npm releases are indexed by the
 [Pi package catalog](https://pi.dev/packages/pi-pushtodisplay) automatically;
 there is no separate submission step.
 
-**Requirements:** Node.js ≥ 18. The `pushtodisplay` CLI is installed automatically as a dependency. If you already have a global `pushtodisplay` binary (e.g. `npm i -g pushtodisplay`), it's used as a fallback.
+**Requirements:** Node.js ≥ 18 and a Push To Display account. The pinned
+`pushtodisplay` CLI is bundled, so there is nothing else to install.
 
-## Quick start
+## Setup
 
-1. **Log in** (opens your browser, OAuth device-code flow):
+Run one command inside pi:
 
-   ```
-   /pushtodisplay-login
-   ```
+```
+/pushtodisplay-setup
+```
 
-2. **Verify the wiring** — sends a test entry to your configured panel and board
-   (panel 1 / the default board unless overridden):
+It logs you in if needed (OAuth device-code flow; the browser opens
+automatically), sends one test entry to your configured panel and board, and
+enables updates only after that entry succeeds.
 
-   ```
-   /pushtodisplay-test
-   ```
+Setup is per pi install. If you already logged in through Codex, opencode, or
+another integration, setup still sends a test entry and records this
+integration's marker; installation or a shared login alone sends nothing.
 
-3. **Check auth state**:
-
-   ```
-   /pushtodisplay-status
-   ```
-
-That's it — the next time you run an agent, your board shows it starting, what it's working on, errors, and when it ends.
+That's it — the next time you run an agent, your board shows it starting, what
+it's working on, errors, and when it ends.
 
 ## Configuration
 
@@ -159,8 +149,9 @@ release running npm test OK 11:40
 
 | Command | Description |
 | --- | --- |
-| `/pushtodisplay-login` | Start OAuth login (opens browser, shows code). |
-| `/pushtodisplay-status` | Show current auth state. |
+| `/pushtodisplay-setup` | Log in if needed, send a test entry, and enable updates. Run this after install. |
+| `/pushtodisplay-login` | Re-authenticate after an expired or revoked login. Does not clear an existing setup. |
+| `/pushtodisplay-status` | Show auth and setup state. |
 | `/pushtodisplay-test` | Send a test update to verify wiring. |
 | `/pushtodisplay-clear` | Write a `log cleared` entry to this panel. |
 
@@ -177,8 +168,8 @@ pi events ──► state ──► message builder ──► sender ──► C
 - **Messages, not state:** `src/messages.ts` turns one event into one sentence. There is no "current status" object to render — `PanelState` is four fields (`agent`, `cwd`, `task`, `closing`).
 - **No coalescing:** every entry is news, so nothing is dropped for being superseded.
 - **One queue, four jobs:** `src/sender.ts` keeps strict order, suppresses consecutive duplicates, trims the oldest steps when the backlog would otherwise run too far behind, and spaces sends ≥ 1.2 s apart — safely above the Sandbox ~1 msg/s cap.
-- **Auth gating:** auth is probed at session start, and re-probed lazily on send at most once every 20 s while unauthenticated (`/pushtodisplay-status` forces a check). Once auth is known to be bad, updates are dropped, never buffered; `/pushtodisplay-login` re-probes and re-enables sending. Gating happens at dispatch time, so every path is covered.
-- **CLI resolution:** the bundled `pushtodisplay` npm dependency is located via the extension's own `node_modules` (no global install needed); falls back to PATH.
+- **Setup + auth gating:** automatic updates require both this pi integration's setup marker and a valid credential. The marker is written only by `/pushtodisplay-setup`, after a test entry succeeds; a shared login from another integration does not create it. Auth is probed at session start, and re-probed lazily on send at most once every 20 s while unauthenticated (`/pushtodisplay-status` forces a check). Once auth is known to be bad, updates are dropped, never buffered; `/pushtodisplay-login` re-probes and restores sending without clearing the marker. Gating happens at dispatch time, so every path is covered.
+- **Bundled runtime:** the pinned `pushtodisplay` CLI is vendored with the package. There is no separate install step; resolution details are internal (see [docs/development.md](https://github.com/pushtodisplay/pi-pushtodisplay/blob/main/docs/development.md)).
 
 ## Development
 
@@ -188,7 +179,10 @@ npm run check        # typecheck + lint + test
 npm test -- --coverage
 ```
 
-The package is plain TypeScript — pi loads `index.ts` directly (no build step). Unit tests live under `src/__tests__/`.
+The package is plain TypeScript — pi loads `index.ts` directly (no build step).
+Unit tests live under `src/__tests__/`. See
+[docs/development.md](https://github.com/pushtodisplay/pi-pushtodisplay/blob/main/docs/development.md)
+for local checkout installs, the git source path, and updating the vendored CLI.
 
 ## Release
 
@@ -215,7 +209,9 @@ After the first publish, the package is installable with
 | `src/sender.ts` | The queue: order, dedupe, bounded backlog, 1.2 s spacing. |
 | `src/payloads.ts` | Wire types and the palette. |
 | `src/auth-gate.ts` | Unknown / logged in / logged out; unknown waits for the probe, known-bad drops. |
-| `src/cli-adapter.ts` | CLI binary resolution, argv mapping, auth probing, error classification. |
+| `src/setup.ts` | Explicit setup: log in if needed, send a test entry, then enable updates. |
+| `src/setup-state.ts` | Per-pi setup marker under `~/.cache/pushtodisplay/pi`. |
+| `src/cli-adapter.ts` | Bundled CLI resolution, argv mapping, auth probing, error classification. |
 | `src/describe.ts` | Human-readable present-tense one-liners for tool calls. |
 
 ## License

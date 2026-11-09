@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# The vendored pushtodisplay CLI is a committed runtime artifact.
+!vendor/pushtodisplay/dist/
+!vendor/pushtodisplay/dist/**
 coverage/
 *.tsbuildinfo
 .DS_Store

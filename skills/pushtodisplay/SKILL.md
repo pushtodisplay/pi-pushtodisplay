@@ -68,14 +68,15 @@ from prompts.
 
 Help when the user wants to:
 
-- **Install** the package: `pi install npm:pi-pushtodisplay` (or
-  `git:github.com/pushtodisplay/pi-pushtodisplay`, or a local path).
-- **Authenticate**: tell them to run `/pushtodisplay-login` (opens the
-  browser, OAuth device-code flow via the `pushtodisplay` CLI; credentials are
-  stored in the OS keychain — macOS Keychain, Linux libsecret, Windows
-  Credential Manager — with a plaintext fallback at
-  `~/.config/pushtodisplay/credentials.json` only when no keychain is
-  available; tokens auto-refresh). Status: `/pushtodisplay-status`. Wiring
+- **Install** the package: `pi install npm:pi-pushtodisplay`.
+- **Set up**: tell them to run `/pushtodisplay-setup` once. It logs in if
+  needed (opens the browser, OAuth device-code flow; credentials are stored in
+  the OS keychain — macOS Keychain, Linux libsecret, Windows Credential Manager
+  — with a plaintext fallback at `~/.config/pushtodisplay/credentials.json` only
+  when no keychain is available; tokens auto-refresh), sends one test entry, and
+  enables updates only after that entry succeeds.
+- **Re-authenticate**: `/pushtodisplay-login` after an expired or revoked login.
+  It does not clear an existing setup. Status: `/pushtodisplay-status`. Wiring
   check: `/pushtodisplay-test`.
 - **Configure panels** for parallel agents. Each agent writes to one panel
   (1–4, default 1); sharing a panel is supported because it is a shared log and
@@ -88,6 +89,14 @@ Help when the user wants to:
 Note: `/pushtodisplay-*` are extension **commands** (slash commands run on the
 user's side, not tool calls). The agent can't run them itself — guide the user,
 or set env vars / config files on their behalf.
+
+## Setup is per install
+
+A Push To Display credential is shared by every integration on the machine.
+Being logged in through Codex, opencode, or another tool does **not** enable
+this pi package. Automatic updates require both a valid login and the per-pi
+setup marker, which only `/pushtodisplay-setup` writes after a test entry
+succeeds. A fresh install with shared credentials sends nothing.
 
 ## Configuration (env vars)
 
@@ -113,10 +122,13 @@ label/panel differences per agent, launch each agent process with its own env.
 
 ## Behavior details worth knowing
 
-- **Auth gating:** auth is probed at session start and re-probed lazily on send
-  at most once every 20 s while unauthenticated; `/pushtodisplay-status` forces
-  a check. Once auth is known to be bad, updates are dropped (never buffered)
-  and sending resumes after login.
+- **Setup + auth gating:** automatic updates require both the per-pi setup
+  marker and a valid credential. The marker is written only after
+  `/pushtodisplay-setup` sends a successful test entry. Auth is probed at
+  session start and re-probed lazily on send at most once every 20 s while
+  unauthenticated; `/pushtodisplay-status` forces a check. Once auth is known
+  to be bad, updates are dropped (never buffered) and sending resumes after
+  login. `/pushtodisplay-login` never clears the marker.
 - **Rate limiting:** every API call counts toward the account's monthly message
   quota and Sandbox tiers cap ~1 msg/s. Entries are queued in strict order,
   spaced ≥ 1.2 s, consecutive duplicates are suppressed, and the backlog is
@@ -126,13 +138,14 @@ label/panel differences per agent, launch each agent process with its own env.
 - **Not-authenticated warning:** one warning is shown when the probe fails;
   `/pushtodisplay-status` rechecks on demand, and `/pushtodisplay-login`
   restores sending.
-- **CLI not found:** the package bundles the `pushtodisplay` CLI as a
-  dependency (`pi install` handles it). If it's still missing, suggest
-  `npm i -g pushtodisplay`.
+- **Not set up:** a fresh install stays silent and shows one warning telling
+  the user to run `/pushtodisplay-setup`.
+- **Runtime missing:** the package bundles everything it needs. If it still
+  reports a missing runtime, ask the user to reinstall the package; do not tell
+  them to install a CLI.
 
 ## Reference
 
 - Package docs: see the `README.md` in the `pi-pushtodisplay` package.
-- Auth flow lives in the CLI: `pushtodisplay auth login --device-code`.
 - Push To Display is a product of Goban Source, LLC —
   [pushtodisplay.com](https://pushtodisplay.com).
