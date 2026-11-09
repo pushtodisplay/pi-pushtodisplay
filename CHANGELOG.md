@@ -5,6 +5,17 @@ All notable changes to **pi-pushtodisplay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-09
+
+Provenance release. No runtime changes.
+
+### Release
+
+- Published from GitHub Actions through npm Trusted Publishing (OIDC), with a
+  provenance attestation.
+- `0.2.1` was the local first publish and has no provenance; this is the first
+  release produced by the automated path.
+
 ## [0.2.1] - 2026-11-09
 
 Release packaging and publishing path for the first npm publish.
