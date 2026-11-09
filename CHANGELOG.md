@@ -13,7 +13,7 @@ Release packaging and publishing path for the first npm publish.
 
 - **The npm tarball no longer ships tests.** `files` excludes
   `src/__tests__`, taking the package from 25 files / 124.6 kB unpacked to
-  15 files / 90.2 kB unpacked (30.9 kB tarball). Runtime files, the Pi
+  15 files / 88.8 kB unpacked (30.5 kB tarball). Runtime files, the Pi
   manifest, skill, README, CHANGELOG, and LICENSE are unchanged.
 - **Explicit public publish config.** `publishConfig.access` is `public` so an
   accidental registry config cannot publish the package as restricted.
