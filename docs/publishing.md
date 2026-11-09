@@ -72,6 +72,16 @@ choose **GitHub Actions**, and enter:
 | Environment name | *(leave empty)* |
 | Allowed actions | allow **npm publish** (direct publishing) |
 
+The same configuration can be created from an interactive terminal with
+npm 11.15+ (it prompts for 2FA):
+
+```bash
+npx --yes npm@11.21.2 trust github pi-pushtodisplay \
+  --file pi-pushtodisplay-publish.yaml \
+  --repository pushtodisplay/pi-pushtodisplay \
+  --allow-publish --yes
+```
+
 Save the configuration and complete an OIDC publish within 2 days; npm expires
 an unverified configuration. The workflow lives at
 `.github/workflows/pi-pushtodisplay-publish.yaml` and already has
